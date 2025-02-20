@@ -1,4 +1,4 @@
-function [R, t, inliers] = recoverPoseFromFundamental(F, K, pts1, pts2)
+function [R, t] = recoverPoseFromFundamental(F, K, pts1, pts2)
 
     E = F;
     

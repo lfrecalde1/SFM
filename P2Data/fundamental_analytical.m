@@ -26,6 +26,6 @@ sing_vals = diag(S_f);
 % The solution is the corresponding column of V
 F_nomr = V_f(:, idx);
 F_norm = reshape(F_nomr, 3, 3)';
-%F_final = pinv(H_U)*F_norm*H_X;
-F_final = F_norm;
+F_final = pinv(K)*F_norm*K;
+%F_final = F_norm;
 end

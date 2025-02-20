@@ -24,9 +24,9 @@ K = cam.K;  % camera intrinsics
 % Define chessboard in the XY-plane (Z=0)
 % ---------------------------------------------------------------
 % Define the number of steps along each axis
-nx = 4; 
-ny = 5;
-nz = 2;
+nx = 6; 
+ny = 6;
+nz = 6;
 
 % Define the step size along each axis
 dx = 0.1; 
@@ -47,8 +47,9 @@ points3D_H = [points3D; ones(1, size(points3D, 2))];
 
 
 % Storage arrays
-samples = 2;
+samples = 3;
 data_uv = ones(3, size(points3D, 2), samples);  % (2, #points, #samples)
+data_uv_noise = ones(3, size(points3D, 2), samples);  % (2, #points, #samples)
 data_xy = ones(3, size(points3D, 2), samples); % (2, #points, #samples)
 
 % Save rotations
@@ -59,12 +60,12 @@ R_camera = zeros(3, 3, samples);
 t_camera = zeros(3, samples);
 
 % Camera positions and angles
-roll_values = [0, 0];
-yaw_values = [0, 20];
-pitch_values = [0, 0];
-z_values = [0, 0.2];
-y_values = [0, -0.2];
-x_values = [0; -0];
+roll_values = [0, 0, 0];
+yaw_values = [0, 20, 0];
+pitch_values = [0, 0, 0];
+z_values = [0, 0.2, 0.2];
+y_values = [0, 0, 0];
+x_values = [0, 0.1, -0.1];
 
 %% Aux values for normalized
 F_identity = [1, 0, 0;...
@@ -139,7 +140,7 @@ for k = 1:samples
     Points3d_C = inv(H_camera)*points3D_I_h;
 
     %% Location origin respect to camara
-    x_from_camara = pinv(R_camera(:, :, k))*(-t_camera(:, k));
+    x_from_camara(:, k) = pinv(R_camera(:, :, k))*(-t_camera(:, k));
     
     % ------- 6) Project onto image plane using the camera intrinsics -------
     %  or directly with 'cam.C'
@@ -156,20 +157,23 @@ for k = 1:samples
     
     % Store the 2D points if you need them later:
     data_uv(1:2, :,k) = pixels_aux;
+    data_uv_noise(1:2, :,k) = pixels_aux;
     % Increase this to get more outliers
-    num_outliers = 5;
+    num_outliers = 11;
     outlier_indices = randperm(size(data_uv,2), num_outliers);
 
     % Increase or decrease these points by a large random amount
     % Adjust the multiplier (e.g., 25, 50, etc.) to control severity of outliers
     multiplier = 0;
+    data_uv_noise(1, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
+    data_uv_noise(2, outlier_indices, k) = data_uv(2, outlier_indices, k) + multiplier * randn(size(outlier_indices));
     data_uv(1, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
-    data_uv(2, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
+    data_uv(2, outlier_indices, k) = data_uv(2, outlier_indices, k) + multiplier * randn(size(outlier_indices));
     data_xy(1:3, :, k) = points3D(1:3, :);
     
     % ----------- Plot the new frame in the same figure -----------
     plot(pixels_aux(1,:), pixels_aux(2,:),'.', 'Color',colors(k,:), 'MarkerSize',12);
-    
+    plot(data_uv_noise(1,:, k), data_uv_noise(2,:, k),'*', 'Color',colors(k,:), 'MarkerSize',15);
     % Optional text
     text(50, 50, sprintf('Iteration %d', k), 'Color',colors(k,:),'FontSize',12);
     
@@ -273,77 +277,43 @@ for k = 1:numFrames
 
 end
 
+for k=1:size(data_uv,3)-1
+    uv_1 = data_uv(:, :, k)
+    uv_2 = data_uv(:, :, k+1);
 
-%% Computing element Matrix
-uv_1 = data_uv(:, :, 1);
-uv_2 = data_uv(:, :, 2);
+    %% Computing  the initial value for the optimizer her we are computing the elemental matrix
+    F_normalization = fundamental_analytical(uv_1, uv_2, cam.K);
 
-% A = [];
-% A_uax = [];
-% for i=1:size(uv_2,2)
-%     %row_1 = [uv_1(1, i)*uv_2(1, i), uv_1(2, i)*uv_2(1, i), uv_2(1, i), uv_1(1, i)*uv_2(2, i), uv_1(2, i)*uv_2(2, i), uv_2(2, i), uv_1(1, i), uv_1(2, i), 1];
-%     row_1 = [uv_1(1, i)*uv_2(1, i), uv_1(1, i)*uv_2(2, i), uv_1(1, i), uv_1(2, i)*uv_2(1, i), uv_1(2, i)*uv_2(2, i), uv_1(2, i), uv_2(1, i), uv_2(2, i), 1];
-%     A = [A;row_1];
-% 
-%     row_kron = kron(uv_1(1:3, i), uv_2(1:3, i))';
-%     A_uax = [A_uax;row_kron];
-% end
-% 
-% 
-% [U, S, V] = svd(A);
-% 
-% % Extract singular values from the diagonal of S into a vector
-% sing_vals = diag(S)
-% 
-% % Find the index of the smallest singular value
-% [~, idx] = min(sing_vals);
-% 
-% % The solution is the corresponding column of V
-% F = V(:, idx);
-% F'*F;
-% F =  reshape(F, 3, 3)'
-% rank(F)
-% [U, S, V] = svd(F);
-% S(end, end) = 0;
-% A_reconstructed_zeroed = U * S * V';
-% rank(A_reconstructed_zeroed)
-% A_reconstructed_zeroed
-% 
-F_normalization = fundamental_analytical(uv_1, uv_2, cam.K)
-rank(F_normalization)
-[U, S, V] = svd(F_normalization);
-S(end, end) = 0;
-F_good_rank = U * S * V';
-rank(F_good_rank)
-F_good_rank
+    %% Since we have tha calibration matrices we can direclty compute the elemental matrix
+    uv_1_aux = pinv(cam.K)*uv_1;
+    uv_2_aux = pinv(cam.K)*uv_2;
 
-%% Compute the essential matrix
-uv_1_aux = pinv(cam.K)*uv_1;
-uv_2_aux = pinv(cam.K)*uv_2;
+    %% Computing solution based on casadi. This solution is not robust to outliers
+    [F_optimization] = FundamentalCasadi(uv_1_aux, uv_2_aux, F_normalization);
 
-%% Computing solution based on casadi
-[F_optimization] = FundamentalCasadi(uv_1_aux, uv_2_aux, F_normalization)
-rank(F_optimization)
-% [U, S, V] = svd(F_optimization);
-% S(end, end) = 0;
-% F_optimization_rank = U * S * V';
-% rank(F_optimization_rank)
-% F_optimization_rank
+    %% Computing solutiion using ransac for outliers
+    [best_model, num_iterations] = fitRansac(uv_1_aux, uv_2_aux, 10, F_normalization, 0.0001);
 
-fRANSAC = estimateFundamentalMatrix(uv_1(1:2,:)', ...
-    uv_2(1:2, :)',Method="MSAC", NumTrials=2000)
 
-rank(fRANSAC)
+    [R, t] = recoverPoseFromFundamental(F_optimization, cam.K, uv_1(1:2, :)', uv_2(1:2, :)');
+    R_opti_only(:, :, k) = R';
+    t_opti_only(:, k) = R'*t;
+    [R_ransac, t_ransac] = recoverPoseFromFundamental(best_model, cam.K, uv_1(1:2, :)', uv_2(1:2, :)');
+    R_opti_ransac(:, :, k) = R_ransac';
+    t_opti_ransac(:, k) = R_ransac'*t_ransac;
 
+end
+%% getting elements of the images
+
+% R'
+% R_ransac'
+% R_camera(:, :, 2)
+% scale = x_from_camara(3)/t(3);
+% scale_2 = x_from_camara(3)/t_ransac(3);
 % 
-% 
-% E_manual_normalize = cam.K' * F_good_rank * cam.K
-% E_manual = cam.K' * A_reconstructed_zeroed * cam.K
-% E_optimization = cam.K' * F_optimization_rank * cam.K
-% R_ransac = cam.K' * fRANSAC * cam.K
-% 
-[R, t, inliers] = recoverPoseFromFundamental(F_optimization, cam.K, uv_1(1:2, :)', uv_2(1:2, :)');
-
-R'
-scale = x_from_camara(3)/t(3);
-t = scale*t
+% t = scale*t
+% t_ransac = t_ransac*scale_2
+% x_from_camara
+R_opti_only
+R_opti_ransac
+R_camera

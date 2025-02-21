@@ -5,8 +5,8 @@ clc; clear; close all;
 % ---------------------------------------------------------------
 % Larger radial and tangential distortion
 k1 = -0.0;    % bigger negative => stronger barrel distortion
-k2 =  0; 
-k3 =  0;      
+k2 =  0.0; 
+k3 =  0.0;      
 p1 =  0.00;   % non-zero tangential distortion
 p2 = -0.00;   % negative sign for demonstration
 
@@ -60,7 +60,7 @@ R_camera = zeros(3, 3, samples);
 t_camera = zeros(3, samples);
 
 % Camera positions and angles
-roll_values = [0, 0, -10, 10];
+roll_values = [0, -10, -10, 10];
 yaw_values = [0, 20, 20, -20];
 pitch_values = [0, 0, 0, 0];
 z_values = [0, 0.2, 0.2, 0.4];
@@ -100,7 +100,7 @@ for k = 1:samples
     Rx = [1 0 0; 0 cos(roll) -sin(roll); 0 sin(roll) cos(roll)];
     Ry = [cos(pitch) 0 sin(pitch); 0 1 0; -sin(pitch) 0 cos(pitch)];
     Rz = [cos(yaw) -sin(yaw) 0; sin(yaw) cos(yaw) 0; 0 0 1];
-    R_plane(:, :, k) = Rz * Ry * Rx;
+    R_plane(:, :, k) = Rx * Ry * Rz;
     
     % ------- 3) Random translation in Z between [1.5, 2.0] -------
     translationZ = 1.5;
@@ -123,7 +123,7 @@ for k = 1:samples
     Rx = [1 0 0; 0 cos(roll_camera) -sin(roll_camera); 0 sin(roll_camera) cos(roll_camera)];
     Ry = [cos(pitch_camera) 0 sin(pitch_camera); 0 1 0; -sin(pitch_camera) 0 cos(pitch_camera)];
     Rz = [cos(yaw_camera) -sin(yaw_camera) 0; sin(yaw_camera) cos(yaw_camera) 0; 0 0 1];
-    R_camera(:, :, k) = Rz * Ry * Rx;
+    R_camera(:, :, k) = Rx * Ry * Rz;
     % ------- 3) Random translation in Z between [1.5, 2.0] -------
     translation_camera_Z = z_values(k);
     translation_camera_y = y_values(k);
@@ -141,8 +141,8 @@ for k = 1:samples
     Points3d_C = inv(H_camera)*points3D_I_h;
 
     %% Location origin respect to camara
-    %x_from_camara(:, k) = pinv(R_camera(:, :, k))*(-t_camera(:, k));
-    x_from_camara(:, k) = (t_camera(:, k));
+    x_from_camara(:, k) = pinv(R_camera(:, :, k))*(-t_camera(:, k));
+    %x_from_camara(:, k) = (t_camera(:, k));
     % ------- 6) Project onto image plane using the camera intrinsics -------
     %  or directly with 'cam.C'
     values_normalized = F_identity*Identity*Points3d_C;
@@ -160,12 +160,12 @@ for k = 1:samples
     data_uv(1:2, :,k) = pixels_aux;
     data_uv_noise(1:2, :,k) = pixels_aux;
     % Increase this to get more outliers
-    num_outliers = 5;
+    num_outliers = 20;
     outlier_indices = randperm(size(data_uv,2), num_outliers);
 
     % Increase or decrease these points by a large random amount
     % Adjust the multiplier (e.g., 25, 50, etc.) to control severity of outliers
-    multiplier = 10;
+    multiplier = 50;
     data_uv_noise(1, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
     data_uv_noise(2, outlier_indices, k) = data_uv(2, outlier_indices, k) + multiplier * randn(size(outlier_indices));
     data_uv(1, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
@@ -277,9 +277,16 @@ for k = 1:numFrames
     pause(0.1);      % short pause to slow down animation
 
 end
-I_init = eye(3);
-T_init = zeros(3, 1);
-H_init = [I_init, T_init;zeros(1,3), 1];
+
+%% Computing transformation and plot approximations
+% Create a figure for live plotting
+figure('Name','Image Plane Animation','NumberTitle','off');
+axis([0 cam.nu 0 cam.nv]);   % x from [0..1280], y from [0..1024]
+axis ij;                     % flip y-axis to match image coords
+hold on; grid on;
+xlabel('u (pixels)'); ylabel('v (pixels)');
+title('Projected Points in the Image Plane');
+colors = lines(samples);  % Alternatively, try jet(numFrames) or hsv(numFrames)
 for k=1:size(data_uv,3)-1
     uv_1 = data_uv(:, :, k);
     uv_2 = data_uv(:, :, k+1);
@@ -296,20 +303,33 @@ for k=1:size(data_uv,3)-1
     
     % % 
     % % %% Computing solutiion using ransac for outliers
-    [best_model, num_iterations] = fitRansac(uv_1, uv_2, 10, F_normalization, 0.0001);
+    [best_model, num_iterations] = fitRansac(uv_1, uv_2, 8, F_normalization, 0.0001);
     [U, S, V ] = svd(best_model);
     vector = [S(1,1), S(2, 2), 0];
     F_rank = U * diag(vector) *V';
     
     % 
     [R, t] = recoverPoseFromFundamental(F_optimization, cam.K, uv_1(1:2, :)', uv_2(1:2, :)', I_init, T_init);
-    R_opti_only(:, :, k) = R';
+    R_opti_only(:, :, k) = R;
     t_opti_only(:, k) = R'*t;
-    
+
     [R_ransac, t_ransac] = recoverPoseFromFundamental(best_model, cam.K, uv_1(1:2, :)', uv_2(1:2, :)', I_init, T_init);
-    R_opti_ransac(:, :, k) = R_ransac';
+    R_opti_ransac(:, :, k) = R_ransac;
     t_opti_ransac(:, k) = R_ransac'*(-t_ransac);
-    % 
+    
+    %% Computing points world
+    P1 = cam.K * [eye(3, 3), zeros(3, 1)];
+    P2 =  cam.K * [R_ransac, t_ransac];
+    pts3D_4xN = triangulatePoints(uv_1, uv_2, P1, P2);
+    pts3D = pts3D_4xN(1:3,:) ./ pts3D_4xN(4,:);
+
+    H1 = [eye(3, 3), zeros(3,1); zeros(1, 3), 1];
+    H2 = [R_ransac, t_ransac; zeros(1, 3), 1];
+    
+    [pixels_aux_1] = projection_values(H1, pts3D_4xN, k1, k2, K);
+    [pixels_aux_2] = projection_values(H2, pts3D_4xN, k1, k2, K);
+    % Reprojection of the points in the images
+    
     % H(:, :, k) = [R_opti_ransac(:, :, k), t_opti_ransac(:, k);zeros(1,3), 1];
     % H_init = [R_opti_ransac(:, :, k), t_opti_ransac(:, k);zeros(1,3), 1];
 
@@ -320,8 +340,16 @@ end
 % R'
 % R_ransac'
 % R_camera(:, :, 2)
-% scale = x_from_camara(3)/t(3);
-% scale_2 = x_from_camara(3)/t_ransac(3);
+scale = x_from_camara(3, 2)/t(3);
+scale_2 = x_from_camara(3, 2)/t_ransac(3);
+
+t = t *scale
+t_ransac = t_ransac *scale_2
+x_from_camara
+
+R
+R_ransac
+R_camera
 % 
 % t = scale*t
 % t_ransac = t_ransac*scale_2

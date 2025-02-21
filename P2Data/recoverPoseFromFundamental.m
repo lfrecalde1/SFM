@@ -1,4 +1,4 @@
-function [R, t] = recoverPoseFromFundamental(F, K, pts1, pts2, Init_rot, Init_trans)
+function [R, t] = recoverPoseFromFundamental(F, K, pts1, pts2)
 
     E = K'*F* K;
     

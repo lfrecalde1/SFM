@@ -5,8 +5,8 @@ clc; clear; close all;
 % ---------------------------------------------------------------
 % Larger radial and tangential distortion
 k1 = -0.0;    % bigger negative => stronger barrel distortion
-k2 =  0; 
-k3 =  0;      
+k2 =  0.0; 
+k3 =  0.0;      
 p1 =  0.00;   % non-zero tangential distortion
 p2 = -0.00;   % negative sign for demonstration
 
@@ -165,7 +165,7 @@ for k = 1:samples
 
     % Increase or decrease these points by a large random amount
     % Adjust the multiplier (e.g., 25, 50, etc.) to control severity of outliers
-    multiplier = 10;
+    multiplier = 20;
     data_uv_noise(1, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
     data_uv_noise(2, outlier_indices, k) = data_uv(2, outlier_indices, k) + multiplier * randn(size(outlier_indices));
     data_uv(1, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
@@ -277,9 +277,16 @@ for k = 1:numFrames
     pause(0.1);      % short pause to slow down animation
 
 end
-I_init = eye(3);
-T_init = zeros(3, 1);
-H_init = [I_init, T_init;zeros(1,3), 1];
+
+%% Computing transformation and plot approximations
+% Create a figure for live plotting
+figure('Name','Image Plane Animation','NumberTitle','off');
+axis([0 cam.nu 0 cam.nv]);   % x from [0..1280], y from [0..1024]
+axis ij;                     % flip y-axis to match image coords
+hold on; grid on;
+xlabel('u (pixels)'); ylabel('v (pixels)');
+title('Projected Points in the Image Plane');
+colors = lines(samples);  % Alternatively, try jet(numFrames) or hsv(numFrames)
 for k=1:size(data_uv,3)-1
     uv_1 = data_uv(:, :, k);
     uv_2 = data_uv(:, :, k+1);
@@ -302,14 +309,38 @@ for k=1:size(data_uv,3)-1
     F_rank = U * diag(vector) *V';
     
     % 
-    [R, t] = recoverPoseFromFundamental(F_optimization, cam.K, uv_1(1:2, :)', uv_2(1:2, :)', I_init, T_init);
-    R_opti_only(:, :, k) = R';
+    [R, t] = recoverPoseFromFundamental(F_optimization, cam.K, uv_1(1:2, :)', uv_2(1:2, :)');
+    R_opti_only(:, :, k) = R;
     t_opti_only(:, k) = R'*t;
 
-    [R_ransac, t_ransac] = recoverPoseFromFundamental(best_model, cam.K, uv_1(1:2, :)', uv_2(1:2, :)', I_init, T_init);
-    R_opti_ransac(:, :, k) = R_ransac';
+    [R_ransac, t_ransac] = recoverPoseFromFundamental(best_model, cam.K, uv_1(1:2, :)', uv_2(1:2, :)');
+    R_opti_ransac(:, :, k) = R_ransac;
     t_opti_ransac(:, k) = R_ransac'*(-t_ransac);
-    % 
+    
+    %% Computing points world
+    P1 = cam.K * [eye(3, 3), zeros(3, 1)];
+    P2 =  cam.K * [R_ransac, t_ransac];
+    pts3D_4xN = triangulatePoints(uv_1, uv_2, P1, P2);
+
+    H1 = [eye(3, 3), zeros(3,1); zeros(1, 3), 1];
+    H2 = [R_ransac, t_ransac; zeros(1, 3), 1];
+    
+    [pixels_aux_1] = projection_values(H1, pts3D_4xN, k1, k2, K);
+    [pixels_aux_2] = projection_values(H2, pts3D_4xN, k1, k2, K);
+
+    plot(uv_1(1, :), uv_1(2, :),'.', 'Color',colors(k,:), 'MarkerSize',15);
+    plot(pixels_aux_1(1,:), pixels_aux_1(2,:),'x', 'Color','k', 'MarkerSize',15);
+    plot(uv_2(1, :), uv_2(2, :),'.', 'Color',colors(k+1,:), 'MarkerSize',15);
+    plot(pixels_aux_2(1,:), pixels_aux_2(2,:),'x', 'Color','k', 'MarkerSize',15);
+
+    % Optional text
+    text(50, 50, sprintf('Iteration %d', k), 'Color',colors(k,:),'FontSize',12);
+    
+    drawnow;         % update the figure
+    pause(0.1);      % short pause to slow down animation
+
+    % Reprojection of the points in the images
+    
     % H(:, :, k) = [R_opti_ransac(:, :, k), t_opti_ransac(:, k);zeros(1,3), 1];
     % H_init = [R_opti_ransac(:, :, k), t_opti_ransac(:, k);zeros(1,3), 1];
 

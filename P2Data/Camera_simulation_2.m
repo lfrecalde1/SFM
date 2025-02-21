@@ -4,8 +4,8 @@ clc; clear; close all;
 % Create camera class (same as your original)
 % ---------------------------------------------------------------
 % Larger radial and tangential distortion
-k1 = -0.0;    % bigger negative => stronger barrel distortion
-k2 =  0.0; 
+k1 = 0.1;    % bigger negative => stronger barrel distortion
+k2 =  -0.1; 
 k3 =  0.0;      
 p1 =  0.00;   % non-zero tangential distortion
 p2 = -0.00;   % negative sign for demonstration
@@ -24,9 +24,9 @@ K = cam.K;  % camera intrinsics
 % Define chessboard in the XY-plane (Z=0)
 % ---------------------------------------------------------------
 % Define the number of steps along each axis
-nx = 6; 
-ny = 6;
-nz = 6;
+nx = 4; 
+ny = 4;
+nz = 10;
 
 % Define the step size along each axis
 dx = 0.1; 
@@ -103,7 +103,7 @@ for k = 1:samples
     R_plane(:, :, k) = Rx * Ry * Rz;
     
     % ------- 3) Random translation in Z between [1.5, 2.0] -------
-    translationZ = 1.5;
+    translationZ = 2.5;
     translationy = -0.25;
     translationx = 0;
     t_plane(:, k) = [translationx; translationy; translationZ];
@@ -160,12 +160,12 @@ for k = 1:samples
     data_uv(1:2, :,k) = pixels_aux;
     data_uv_noise(1:2, :,k) = pixels_aux;
     % Increase this to get more outliers
-    num_outliers = 20;
+    num_outliers = 0;
     outlier_indices = randperm(size(data_uv,2), num_outliers);
 
     % Increase or decrease these points by a large random amount
     % Adjust the multiplier (e.g., 25, 50, etc.) to control severity of outliers
-    multiplier = 20;
+    multiplier = 5;
     data_uv_noise(1, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
     data_uv_noise(2, outlier_indices, k) = data_uv(2, outlier_indices, k) + multiplier * randn(size(outlier_indices));
     data_uv(1, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
@@ -198,9 +198,9 @@ plot3([0 0],[0 0.05],[0 0],'g','LineWidth',2); % Y-axis (green)
 plot3([0 0],[0 0],[0 0.05],'b','LineWidth',2); % Z-axis (blue)
 text(0, 0, 0, 'Inertial', 'FontSize', 14, 'Color', 'k', 'HorizontalAlignment','left');
 % Set axis limits: x from -0.3 to 0.3, y from -0.3 to 0.3, and z from 0 to 0.8
-xlim([-1, 1.5]);
+xlim([-1, 1]);
 ylim([-1, 1]);
-zlim([-1, 2]);
+zlim([-1, 3]);
 % Adjust the view
 view(13,20);
 % Decide how "long" you want each axis to appear:
@@ -303,7 +303,7 @@ for k=1:size(data_uv,3)-1
     
     % % 
     % % %% Computing solutiion using ransac for outliers
-    [best_model, num_iterations] = fitRansac(uv_1, uv_2, 8, F_normalization, 0.0001);
+    [best_model, num_iterations] = fitRansac(uv_1, uv_2, 8, F_normalization, 0.01);
     [U, S, V ] = svd(best_model);
     vector = [S(1,1), S(2, 2), 0];
     F_rank = U * diag(vector) *V';
@@ -321,52 +321,69 @@ for k=1:size(data_uv,3)-1
     P1 = cam.K * [eye(3, 3), zeros(3, 1)];
     P2 =  cam.K * [R_ransac, t_ransac];
     pts3D_4xN = triangulatePoints(uv_1, uv_2, P1, P2);
+    pts3D_4xN = pts3D_4xN./pts3D_4xN(4, :);
+    
 
     H1 = [eye(3, 3), zeros(3,1); zeros(1, 3), 1];
     H2 = [R_ransac, t_ransac; zeros(1, 3), 1];
     
+
+    %% Compute a better points based on casadi non-linear optimization
+    x_init  = init_optimization_variables(t_ransac, R_ransac, pts3D_4xN);
+    [x_vector_opt, x_trans_opt, R_quaternion_opt, distortion] = cameraCalibrationCasADi(pts3D_4xN, uv_2, cam.K, x_init);
+    H2_casadi = [R_quaternion_opt, x_trans_opt; zeros(1, 3), 1];
+    pts3D_4xN_casadi = [x_vector_opt; ones(1, size(pts3D_4xN,2))];
+
     [pixels_aux_1] = projection_values(H1, pts3D_4xN, k1, k2, K);
     [pixels_aux_2] = projection_values(H2, pts3D_4xN, k1, k2, K);
+    [pixels_aux_2_casadi] = projection_values(H2_casadi, pts3D_4xN_casadi, distortion(1), distortion(2), K);
 
-    plot(uv_1(1, :), uv_1(2, :),'.', 'Color',colors(k,:), 'MarkerSize',15);
-    plot(pixels_aux_1(1,:), pixels_aux_1(2,:),'x', 'Color','k', 'MarkerSize',15);
+
+    %% Computing the error of the approximation
+    error = norm(uv_2(1:2, :) - pixels_aux_2, 2)
+    error_casadi =  norm(uv_2(1:2, :) - pixels_aux_2_casadi, 2)
+
+    %% Plot results image
     plot(uv_2(1, :), uv_2(2, :),'.', 'Color',colors(k+1,:), 'MarkerSize',15);
-    plot(pixels_aux_2(1,:), pixels_aux_2(2,:),'x', 'Color','k', 'MarkerSize',15);
+    plot(pixels_aux_2(1,:), pixels_aux_2(2,:),'x', 'Color','g', 'MarkerSize',15);
+    plot(pixels_aux_2_casadi(1,:), pixels_aux_2_casadi(2,:),'*', 'Color','b', 'MarkerSize',15);
 
     % Optional text
     text(50, 50, sprintf('Iteration %d', k), 'Color',colors(k,:),'FontSize',12);
     
-    drawnow;         % update the figure
-    pause(0.1);      % short pause to slow down animation
-
-    % Reprojection of the points in the images
-    
-    % H(:, :, k) = [R_opti_ransac(:, :, k), t_opti_ransac(:, k);zeros(1,3), 1];
-    % H_init = [R_opti_ransac(:, :, k), t_opti_ransac(:, k);zeros(1,3), 1];
-
-    %I_init = R_opti_ransac(:, :, k);
+    drawnow;         
+    pause(0.1);      
 end
-%% getting elements of the images
 
-% R'
-% R_ransac'
-% R_camera(:, :, 2)
+%% getting elements of the images
 scale = x_from_camara(3, 2)/t(3);
 scale_2 = x_from_camara(3, 2)/t_ransac(3);
+scale_casadi = x_from_camara(3, 2)/ H2_casadi(3, 4);
 
 t = t *scale
 t_ransac = t_ransac *scale_2
+t_casadi = x_trans_opt * scale_casadi
 x_from_camara
 
-R
-R_ransac
+R'
+R_ransac'
+R_quaternion_opt'
 R_camera
-% 
-% t = scale*t
-% t_ransac = t_ransac*scale_2
-% x_from_camara
-% scale = x_from_camara(3, 2)/H(3,4,1);
-% H_total_manual = H(:,:,1);
-% x_estimation = 
-% x_from_camara
-% R_camera
+
+%% Check results
+figure('Name','Validation Points', 'Position', [100, 100, 1200, 1200]);
+hold on; grid on; axis equal;
+xlabel('X'); ylabel('Y'); zlabel('Z');
+title('Validation Points');
+
+% Optionally plot the inertial frame axes at the origin:
+plot3([0 0.05],[0 0],[0 0],'r','LineWidth',2); % X-axis (red)
+plot3([0 0],[0 0.05],[0 0],'g','LineWidth',2); % Y-axis (green)
+plot3([0 0],[0 0],[0 0.05],'b','LineWidth',2); % Z-axis (blue)
+text(0, 0, 0, 'Inertial', 'FontSize', 14, 'Color', 'k', 'HorizontalAlignment','left');
+% Set axis limits: x from -0.3 to 0.3, y from -0.3 to 0.3, and z from 0 to 0.8
+% Adjust the view
+view(13,20);
+plot3(pts3D_4xN(1,:), pts3D_4xN(2,:), pts3D_4xN(3,:), 'o', ...
+          'MarkerSize', 2, 'MarkerFaceColor', currentColor);
+plot3(pts3D_4xN_casadi(1,:), pts3D_4xN_casadi(2,:), pts3D_4xN_casadi(3,:),'*', 'Color','b', 'MarkerSize',15);

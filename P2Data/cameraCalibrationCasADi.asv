@@ -1,4 +1,4 @@
-function [x_vector_opt, x_trans_opt, R_quaternion_opt, distortion_opt] = cameraCalibrationCasADi(pts1, pts2, A, x_init)
+function [x_vector_opt, x_trans_opt, R_quaternion_opt, distor] = cameraCalibrationCasADi(pts1, pts2, A, x_init)
 
 addpath('/home/fer/casadi-3.6.7-linux64-matlab2018b');
 import casadi.*;
@@ -50,7 +50,7 @@ values_normalized_aux = values_normalized(1:2, :)./aux_normalization;
 
 %     % APLYING BARREL DISTORTION
 radius = sqrt(sum(values_normalized_aux.^2, 1));
-D = 1 + distortion(1)*radius.^2 + distortion(2)*radius.^4;
+D = 1 + 0*radius.^2 + 0*radius.^4;
 D_aux = [D;D];
 x_warp = values_normalized_aux.*D_aux;
 x_warp_aux = [x_warp; ones(1, length(x_warp))];

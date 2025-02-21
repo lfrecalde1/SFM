@@ -1,4 +1,4 @@
-function [F_rank] = fundamental_analytical(X, U, K)
+function [F_final] = fundamental_analytical(X, U, K)
 %UNTITLED Summary of this function goes here
 %   Detailed explanation goes here
 % Normalize the data
@@ -28,8 +28,9 @@ F_nomr = V_f(:, idx);
 F_norm = reshape(F_nomr, 3, 3)';
 F_final = F_norm;
 
-% Reduce rank of the system
+
 [U, S, V] = svd(F_final);
 vector = [S(1,1), S(2, 2), 0];
 F_rank = U * diag(vector) *V';
+
 end

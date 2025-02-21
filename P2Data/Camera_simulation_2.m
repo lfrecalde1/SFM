@@ -47,7 +47,7 @@ points3D_H = [points3D; ones(1, size(points3D, 2))];
 
 
 % Storage arrays
-samples = 3;
+samples = 2;
 data_uv = ones(3, size(points3D, 2), samples);  % (2, #points, #samples)
 data_uv_noise = ones(3, size(points3D, 2), samples);  % (2, #points, #samples)
 data_xy = ones(3, size(points3D, 2), samples); % (2, #points, #samples)
@@ -60,12 +60,13 @@ R_camera = zeros(3, 3, samples);
 t_camera = zeros(3, samples);
 
 % Camera positions and angles
-roll_values = [0, 0, 0];
-yaw_values = [0, 20, 20];
-pitch_values = [0, 0, 0];
-z_values = [0, 0.2, 0.2];
-y_values = [0, 0, 0];
-x_values = [0, 0.1, -0.1];
+roll_values = [0, -10, -10, 10];
+yaw_values = [0, 20, 20, -20];
+pitch_values = [0, 0, 0, 0];
+z_values = [0, 0.2, 0.2, 0.4];
+y_values = [0, 0, 0.1, 0];
+x_values = [0, 0.1, 0.0, 0.1];
+
 
 %% Aux values for normalized
 F_identity = [1, 0, 0;...
@@ -99,7 +100,7 @@ for k = 1:samples
     Rx = [1 0 0; 0 cos(roll) -sin(roll); 0 sin(roll) cos(roll)];
     Ry = [cos(pitch) 0 sin(pitch); 0 1 0; -sin(pitch) 0 cos(pitch)];
     Rz = [cos(yaw) -sin(yaw) 0; sin(yaw) cos(yaw) 0; 0 0 1];
-    R_plane(:, :, k) = Rz * Ry * Rx;
+    R_plane(:, :, k) = Rx * Ry * Rz;
     
     % ------- 3) Random translation in Z between [1.5, 2.0] -------
     translationZ = 1.5;
@@ -122,7 +123,7 @@ for k = 1:samples
     Rx = [1 0 0; 0 cos(roll_camera) -sin(roll_camera); 0 sin(roll_camera) cos(roll_camera)];
     Ry = [cos(pitch_camera) 0 sin(pitch_camera); 0 1 0; -sin(pitch_camera) 0 cos(pitch_camera)];
     Rz = [cos(yaw_camera) -sin(yaw_camera) 0; sin(yaw_camera) cos(yaw_camera) 0; 0 0 1];
-    R_camera(:, :, k) = Rz * Ry * Rx;
+    R_camera(:, :, k) = Rx * Ry * Rz;
     % ------- 3) Random translation in Z between [1.5, 2.0] -------
     translation_camera_Z = z_values(k);
     translation_camera_y = y_values(k);
@@ -141,7 +142,7 @@ for k = 1:samples
 
     %% Location origin respect to camara
     x_from_camara(:, k) = pinv(R_camera(:, :, k))*(-t_camera(:, k));
-    
+    %x_from_camara(:, k) = (t_camera(:, k));
     % ------- 6) Project onto image plane using the camera intrinsics -------
     %  or directly with 'cam.C'
     values_normalized = F_identity*Identity*Points3d_C;
@@ -159,12 +160,12 @@ for k = 1:samples
     data_uv(1:2, :,k) = pixels_aux;
     data_uv_noise(1:2, :,k) = pixels_aux;
     % Increase this to get more outliers
-    num_outliers = 11;
+    num_outliers = 20;
     outlier_indices = randperm(size(data_uv,2), num_outliers);
 
     % Increase or decrease these points by a large random amount
     % Adjust the multiplier (e.g., 25, 50, etc.) to control severity of outliers
-    multiplier = 0;
+    multiplier = 10;
     data_uv_noise(1, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
     data_uv_noise(2, outlier_indices, k) = data_uv(2, outlier_indices, k) + multiplier * randn(size(outlier_indices));
     data_uv(1, outlier_indices, k) = data_uv(1, outlier_indices, k) + multiplier * randn(size(outlier_indices));
@@ -276,7 +277,9 @@ for k = 1:numFrames
     pause(0.1);      % short pause to slow down animation
 
 end
-
+I_init = eye(3);
+T_init = zeros(3, 1);
+H_init = [I_init, T_init;zeros(1,3), 1];
 for k=1:size(data_uv,3)-1
     uv_1 = data_uv(:, :, k);
     uv_2 = data_uv(:, :, k+1);
@@ -285,35 +288,54 @@ for k=1:size(data_uv,3)-1
     F_normalization = fundamental_analytical(uv_1, uv_2, cam.K);
 
     %% Since we have tha calibration matrices we can direclty compute the elemental matrix
-    uv_1_aux = pinv(cam.K)*uv_1;
-    uv_2_aux = pinv(cam.K)*uv_2;
-
+    %uv_1_aux = pinv(cam.K)*uv_1;
+    %uv_2_aux = pinv(cam.K)*uv_2;
+    % 
     %% Computing solution based on casadi. This solution is not robust to outliers
-    [F_optimization] = FundamentalCasadi(uv_1_aux, uv_2_aux, F_normalization);
-
-    %% Computing solutiion using ransac for outliers
-    [best_model, num_iterations] = fitRansac(uv_1_aux, uv_2_aux, 10, F_normalization, 0.0001);
-
-
-    [R, t] = recoverPoseFromFundamental(F_optimization, cam.K, uv_1(1:2, :)', uv_2(1:2, :)');
+    [F_optimization] = FundamentalCasadi(uv_1, uv_2, F_normalization);
+    
+    % % 
+    % % %% Computing solutiion using ransac for outliers
+    [best_model, num_iterations] = fitRansac(uv_1, uv_2, 8, F_normalization, 0.0001);
+    [U, S, V ] = svd(best_model);
+    vector = [S(1,1), S(2, 2), 0];
+    F_rank = U * diag(vector) *V';
+    
+    % 
+    [R, t] = recoverPoseFromFundamental(F_optimization, cam.K, uv_1(1:2, :)', uv_2(1:2, :)', I_init, T_init);
     R_opti_only(:, :, k) = R';
     t_opti_only(:, k) = R'*t;
-    [R_ransac, t_ransac] = recoverPoseFromFundamental(best_model, cam.K, uv_1(1:2, :)', uv_2(1:2, :)');
-    R_opti_ransac(:, :, k) = R_ransac';
-    t_opti_ransac(:, k) = R_ransac'*t_ransac;
 
+    [R_ransac, t_ransac] = recoverPoseFromFundamental(best_model, cam.K, uv_1(1:2, :)', uv_2(1:2, :)', I_init, T_init);
+    R_opti_ransac(:, :, k) = R_ransac';
+    t_opti_ransac(:, k) = R_ransac'*(-t_ransac);
+    % 
+    % H(:, :, k) = [R_opti_ransac(:, :, k), t_opti_ransac(:, k);zeros(1,3), 1];
+    % H_init = [R_opti_ransac(:, :, k), t_opti_ransac(:, k);zeros(1,3), 1];
+
+    %I_init = R_opti_ransac(:, :, k);
 end
 %% getting elements of the images
 
 % R'
 % R_ransac'
 % R_camera(:, :, 2)
-% scale = x_from_camara(3)/t(3);
-% scale_2 = x_from_camara(3)/t_ransac(3);
+scale = x_from_camara(3, 2)/t(3);
+scale_2 = x_from_camara(3, 2)/t_ransac(3);
+
+t = t *scale
+t_ransac = t_ransac *scale_2
+x_from_camara
+
+R
+R_ransac
+R_camera
 % 
 % t = scale*t
 % t_ransac = t_ransac*scale_2
 % x_from_camara
-R_opti_only
-R_opti_ransac
-R_camera
+% scale = x_from_camara(3, 2)/H(3,4,1);
+% H_total_manual = H(:,:,1);
+% x_estimation = 
+% x_from_camara
+% R_camera

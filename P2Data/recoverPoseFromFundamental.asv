@@ -44,6 +44,7 @@ function [R, t] = recoverPoseFromFundamental(F, K, pts1, pts2, Init_rot, Init_tr
         for iT = 1:2
             R_test = R_candidates(:,:,iRot);
             t_test = t_candidates(:, iT);
+         
             
             if det(R_test) < 0
                 t_test = - t_test;
